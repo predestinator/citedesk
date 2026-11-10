@@ -1,0 +1,61 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>CiteDesk — pay only what the papers agree on</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;600&family=Newsreader:opsz,wght@6..72,400;6..72,600;6..72,700&family=Source+Sans+3:wght@400;600;700&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="/static/style.css" />
+</head>
+<body>
+  <header class="mast">
+    <div class="mast-mark">
+      <span class="rule-num">AP-01</span>
+      <strong>CiteDesk</strong>
+    </div>
+    <p class="mast-line">Pay only what the papers agree on.</p>
+    <p class="mast-sub">An accounts-payable desk that asks Clocked to extract, compare, ground, and guard incoming invoices before anyone can clear a payment.</p>
+    <div class="mast-meta">
+      <span id="key-pill" class="pill {% if keyed %}ok{% else %}warn{% endif %}">
+        {% if keyed %}Clocked key loaded{% else %}Clocked key not set{% endif %}
+      </span>
+      <span class="pill">Built for the Clocked Build Challenge</span>
+    </div>
+  </header>
+
+  <main class="desk">
+    <section class="sheet intake">
+      <h1>Case intake</h1>
+      <p class="lede">Paste an incoming invoice or supplier email, then the purchase order or policy it must match. Clocked reads both. CiteDesk will not approve a payment if Guard flags override language.</p>
+      <div class="sample-row" id="sample-row"></div>
+      <label for="incoming">Incoming document</label>
+      <textarea id="incoming" rows="12" placeholder="Invoice, payment instruction, or supplier email…"></textarea>
+      <label for="source">Source of truth</label>
+      <textarea id="source" rows="10" placeholder="Purchase order, policy excerpt, or agreed quote…"></textarea>
+      <label for="script">Optional attached script</label>
+      <textarea id="script" rows="5" placeholder="Leave blank unless a script arrived with the invoice."></textarea>
+      <div class="actions">
+        <button id="review-btn" type="button">Run the desk</button>
+        <span id="status" class="status"></span>
+      </div>
+    </section>
+
+    <section class="sheet file" id="case-file">
+      <div class="file-head">
+        <h1>Case file</h1>
+        <div id="stamp" class="stamp idle">Awaiting review</div>
+      </div>
+      <p id="stamp-reason" class="reason">Load a sample or paste two documents, then run the desk.</p>
+      <div id="error-box" class="error hidden"></div>
+      <div id="panels" class="panels"></div>
+    </section>
+  </main>
+
+  <footer class="colophon">
+    <p>CiteDesk calls Clocked Protect, Guard, Inspect, Extract, Fill, Decide, Verify, Compare, and Rerank. Endpoint output changes what the desk shows and whether payment can be cleared. Synthetic samples only — no real customer data.</p>
+  </footer>
+  <script src="/static/app.js"></script>
+</body>
+</html>
