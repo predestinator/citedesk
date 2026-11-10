@@ -143,26 +143,59 @@ def _split_passages(label: str, text: str) -> list[dict[str, str]]:
     return passages
 
 
+def _masked_text(pii: dict[str, Any], incoming: str) -> str:
+    return str(
+        pii.get("anonymized_text")
+        or pii.get("text")
+        or pii.get("anonymized")
+        or pii.get("transformed")
+        or incoming
+    )
+
+
+def _call_endpoint(name: str, fn) -> tuple[dict[str, Any], str | None]:
+    try:
+        return _as_dict(fn()), None
+    except Exception as exc:  # noqa: BLE001 — keep the rest of the desk running
+        return {"error": f"{type(exc).__name__}: {exc}", "endpoint": name}, f"{type(exc).__name__}: {exc}"
+
+
 def _injection_flagged(payload: dict[str, Any]) -> bool:
-    if not payload:
+    if not payload or payload.get("error"):
+        return False
+    verdict = str(payload.get("verdict") or "").lower()
+    if verdict == "injection":
+        return True
+    if verdict == "benign":
         return False
     if payload.get("flagged") is True:
         return True
     decision = payload.get("decision")
     if isinstance(decision, bool):
         return decision
+    threshold = payload.get("threshold")
+    cutoff = threshold if isinstance(threshold, (int, float)) else 0.5
     for key in ("probability", "score", "noul", "injection"):
         value = payload.get(key)
-        if isinstance(value, (int, float)) and value >= 0.5:
+        if isinstance(value, (int, float)) and value >= cutoff:
             return True
         if isinstance(value, dict):
             inner = value.get("noul") or value.get("probability")
-            if isinstance(inner, (int, float)) and inner >= 0.5:
+            if isinstance(inner, (int, float)) and inner >= cutoff:
                 return True
-    severity = str(payload.get("severity") or payload.get("category") or "").lower()
-    if any(word in severity for word in ("high", "critical", "severe", "injection")):
-        return True
     return False
+
+
+def _script_flagged(payload: dict[str, Any]) -> bool:
+    if not payload or payload.get("error"):
+        return False
+    verdict = str(payload.get("verdict") or "").lower()
+    if verdict in {"malicious", "harmful", "unsafe"}:
+        return True
+    threshold = payload.get("threshold")
+    cutoff = threshold if isinstance(threshold, (int, float)) else 0.5
+    malicious = payload.get("malicious")
+    return isinstance(malicious, (int, float)) and malicious >= cutoff
 
 
 def _recommended_action(decide: dict[str, Any], injection_hit: bool, compare: dict[str, Any]) -> dict[str, Any]:
@@ -226,58 +259,81 @@ def run_review(incoming: str, source: str, script: str = "") -> dict[str, Any]:
 
     client = _client()
     used: list[str] = []
+    errors: dict[str, str] = {}
 
-    pii = _as_dict(client.pii(text=incoming, anonymize="mask", timeout=120))
+    pii, err = _call_endpoint("pii", lambda: client.pii(text=incoming, anonymize="mask", timeout=120))
     used.append("pii")
-    safe_text = pii.get("text") or pii.get("anonymized") or pii.get("transformed") or incoming
+    if err:
+        errors["pii"] = err
+    safe_text = _masked_text(pii, incoming)
 
-    injection = _as_dict(client.injection(text=incoming, source="content", timeout=120))
+    injection, err = _call_endpoint(
+        "injection", lambda: client.injection(text=incoming, source="content", timeout=120)
+    )
     used.append("injection")
+    if err:
+        errors["injection"] = err
     injection_hit = _injection_flagged(injection)
 
-    extract = _as_dict(client.extract(text=incoming, fields=EXTRACT_FIELDS, timeout=120))
+    extract, err = _call_endpoint(
+        "extract", lambda: client.extract(text=incoming, fields=EXTRACT_FIELDS, timeout=120)
+    )
     used.append("extract")
+    if err:
+        errors["extract"] = err
 
-    fill = _as_dict(
-        client.fill(
+    fill, err = _call_endpoint(
+        "fill",
+        lambda: client.fill(
             text=incoming,
             fields=FILL_FIELDS,
             reference_date="2026-11-10",
             timeout=120,
-        )
+        ),
     )
     used.append("fill")
+    if err:
+        errors["fill"] = err
 
     script_result = None
     if script:
-        script_result = _as_dict(client.script(script=script, timeout=120))
+        script_result, err = _call_endpoint("script", lambda: client.script(script=script, timeout=120))
         used.append("script")
+        if err:
+            errors["script"] = err
 
-    compare = _as_dict(
-        client.compare(
+    compare, err = _call_endpoint(
+        "compare",
+        lambda: client.compare(
             documents=[
                 {"id": "incoming", "text": incoming},
                 {"id": "source", "text": source},
             ],
             evidence="flagged",
             timeout=120,
-        )
+        ),
     )
     used.append("compare")
+    if err:
+        errors["compare"] = err
 
-    grounding = _as_dict(
-        client.grounding(
+    grounding, err = _call_endpoint(
+        "grounding",
+        lambda: client.grounding(
             answer=incoming,
             documents=[{"id": "source-of-truth", "text": source}],
             evidence="flagged",
             timeout=120,
-        )
+        ),
     )
     used.append("grounding")
+    if err:
+        errors["grounding"] = err
 
     passages = _split_passages("incoming", incoming) + _split_passages("source", source)
-    rerank = _as_dict(
-        client.rerank(
+    rerank, err = _call_endpoint(
+        "rerank",
+        lambda: client.rerank(
             query=(
                 "What should an accounts-payable reviewer read before releasing or holding this payment?"
             ),
@@ -286,9 +342,11 @@ def run_review(incoming: str, source: str, script: str = "") -> dict[str, Any]:
             instructions="Prefer passages that confirm or contradict amount, supplier, beneficiary, or approval rules.",
             top_n=8,
             timeout=120,
-        )
+        ),
     )
     used.append("rerank")
+    if err:
+        errors["rerank"] = err
 
     decide_state = {
         "incoming_document": incoming,
@@ -296,23 +354,40 @@ def run_review(incoming: str, source: str, script: str = "") -> dict[str, Any]:
         "guard_flagged_injection": injection_hit,
         "extracted_fields": (extract.get("fields") or extract),
     }
-    decide = _as_dict(client.decide(state=decide_state, questions=DECIDE_QUESTIONS, timeout=120))
+    decide, err = _call_endpoint(
+        "decide", lambda: client.decide(state=decide_state, questions=DECIDE_QUESTIONS, timeout=120)
+    )
     used.append("decide")
+    if err:
+        errors["decide"] = err
 
     recommendation = _recommended_action(decide, injection_hit, compare)
-    if script_result and not injection_hit:
-        verdict = str(script_result.get("verdict") or script_result.get("decision") or "").lower()
-        if any(word in verdict for word in ("harmful", "unsafe", "malicious")):
-            recommendation = {
-                "stamp": "escalate",
-                "label": "Escalate — attached script",
-                "reason": "Inspect flagged the attached script, so payment cannot be auto-cleared even if the invoice matches.",
-                "source": "clocked.script",
-            }
+    if script_result and not injection_hit and _script_flagged(script_result):
+        recommendation = {
+            "stamp": "escalate",
+            "label": "Escalate — attached script",
+            "reason": "Inspect flagged the attached script, so payment cannot be auto-cleared even if the invoice matches.",
+            "source": "clocked.script",
+        }
+    if "injection" in errors and recommendation.get("stamp") == "approve":
+        recommendation = {
+            "stamp": "request_info",
+            "label": "Review needed",
+            "reason": "Guard did not complete, so CiteDesk will not auto-clear payment.",
+            "source": "citedesk.policy",
+        }
+    if script and "script" in errors and recommendation.get("stamp") == "approve":
+        recommendation = {
+            "stamp": "request_info",
+            "label": "Review needed",
+            "reason": "Inspect did not complete for the attached script, so payment stays with a human.",
+            "source": "citedesk.policy",
+        }
 
     return {
         "live": True,
         "used_endpoints": used,
+        "endpoint_errors": errors,
         "recommendation": recommendation,
         "safe_text": safe_text,
         "pii": pii,

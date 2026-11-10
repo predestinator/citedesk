@@ -1,7 +1,7 @@
 # CiteDesk demo
 
-- `citedesk-demo.mp4` — 23-second walkthrough: live intake UI plus slides for the Hold sample, the matching invoice, and the Clocked endpoints the desk uses.
+- `citedesk-demo.mp4` — 80-second walkthrough of the live desk against the real Clocked API. Sample 1 (bank-detail swap) stamps Hold after Guard reports injection 99.3% / instruction override / critical. Sample 2 (matching invoice) stamps Clear to pay; Decide next action is approve 82%, Compare is clean, risk is 0.13/3.
 - `citedesk-demo.gif` — the same sequence.
-- `raw/01-intake.png` — screenshot of the running app at http://127.0.0.1:5055
+- `intake.png`, `hold.png`, `hold-guard.png`, `hold-extract.png`, `match-intake.png`, `approve.png`, `approve-decide.png` — screenshots of those live reviews.
 
-The intake frame is a real screenshot of the app. The following slides explain the samples and control logic. A recording of a live Clocked review needs `CLOCKED_API_KEY` (free account + code `CLOCKEDHACKATHON`).
+Frames are captures of the running app at http://127.0.0.1:5055 after it returned live Clocked responses. The Clocked key is never shown (the UI only says “Clocked key loaded”).
